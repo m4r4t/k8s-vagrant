@@ -1,8 +1,12 @@
-KUBER_NET = "192.168.50"
+KUBER_NET = "192.168.60"
 
 
 Vagrant.configure("2") do |config|
-  config.vm.provision :shell, privileged: true, inline: $install_common_tools
+  config.vm.provision "shell" do |s|
+    s.privileged = true
+    s.inline = $install_common_tools
+    s.args = KUBER_NET
+  end
 
   config.vm.define :master do |master|
     master.vm.provider :virtualbox do |vb|
@@ -14,7 +18,11 @@ Vagrant.configure("2") do |config|
     #master.disksize.size = "25GB"
     master.vm.hostname = "master"
     master.vm.network :private_network, ip: KUBER_NET + ".10"
-    master.vm.provision :shell, privileged: false, inline: $provision_master_node
+    master.vm.provision "shell" do |s|
+      s.privileged = false
+      s.inline = $provision_master_node
+      s.args = KUBER_NET
+    end
   end
 
   #%w{node1 node2 node3}.each_with_index do |name, i|
@@ -29,19 +37,24 @@ Vagrant.configure("2") do |config|
       #node.disksize.size = "25GB"
       node.vm.hostname = name
       node.vm.network :private_network, ip: KUBER_NET + ".#{i + 11}"
-      node.vm.provision :shell, privileged: false, inline: <<-SHELL
-sudo /vagrant/join.sh
-echo 'Environment="KUBELET_EXTRA_ARGS=--node-ip=192.168.50.#{i + 11}"' | sudo tee -a /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
-cat /vagrant/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
-sudo systemctl daemon-reload
-sudo systemctl restart kubelet
-SHELL
+      node.vm.provision "shell" do |s|
+        s.privileged = false
+        s.inline = $node_join
+        s.args = [KUBER_NET, i + 11]
+      end
     end
   end
 
   config.vm.provision "shell", inline: $install_multicast
 end
 
+$node_join = <<-SHELL
+sudo /vagrant/join.sh
+echo 'Environment="KUBELET_EXTRA_ARGS=--node-ip='$1.$2'"' | sudo tee -a /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+cat /vagrant/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+SHELL
 
 $install_common_tools = <<-SCRIPT
 # bridged traffic to iptables is enabled for kube-router.
@@ -63,10 +76,10 @@ sed -e '/^.*ubuntu-bionic.*/d' -i /etc/hosts
 apt-get update && apt-get upgrade -y
 
 # Create local host entries
-echo "192.168.50.10 master" >> /etc/hosts
-echo "192.168.50.11 node1" >> /etc/hosts
-echo "192.168.50.12 node2" >> /etc/hosts
-echo "192.168.50.13 node3" >> /etc/hosts
+echo "$1.10 master" >> /etc/hosts
+echo "$1.11 node1" >> /etc/hosts
+echo "$1.12 node2" >> /etc/hosts
+echo "$1.13 node3" >> /etc/hosts
 
 # disable swap
 swapoff -a
@@ -102,7 +115,7 @@ cat /home/vagrant/.ssh/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
 cat /home/vagrant/.ssh/id_rsa.pub > ${KEY_FILE}
 
 # Start cluster
-sudo kubeadm init --apiserver-advertise-address=192.168.50.10 --pod-network-cidr=10.244.0.0/16 | grep -Ei "kubeadm join|discovery-token-ca-cert-hash" > ${OUTPUT_FILE}
+sudo kubeadm init --apiserver-advertise-address=$1.10 --pod-network-cidr=10.244.0.0/16 | grep -Ei "kubeadm join|discovery-token-ca-cert-hash" > ${OUTPUT_FILE}
 chmod +x $OUTPUT_FILE
 
 # Configure kubectl for vagrant and root users
@@ -114,7 +127,7 @@ sudo cp -i /etc/kubernetes/admin.conf /root/.kube/config
 sudo chown -R root:root /root/.kube
 
 # Fix kubelet IP
-echo 'Environment="KUBELET_EXTRA_ARGS=--node-ip=$1.10"' | sudo tee -a /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+echo 'Environment="KUBELET_EXTRA_ARGS=--node-ip='$1'.10"' | sudo tee -a /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 
 # Use our flannel config file so that routing will work properly
 kubectl create -f /vagrant/kube-flannel.yml
