@@ -1,4 +1,4 @@
-KUBER_NET = "192.168.60"
+KUBER_NET = "192.168.50"
 
 
 Vagrant.configure("2") do |config|
@@ -64,18 +64,11 @@ net/bridge/bridge-nf-call-iptables = 1
 net/bridge/bridge-nf-call-arptables = 1
 EOF
 
-set -e
-IFNAME=$1
-ADDRESS="$(ip -4 addr show $IFNAME | grep "inet" | head -1 |awk '{print $2}' | cut -d/ -f1)"
-sed -e "s/^.*${HOSTNAME}.*/${ADDRESS} ${HOSTNAME} ${HOSTNAME}.local/" -i /etc/hosts
-
-# remove ubuntu-bionic entry
-sed -e '/^.*ubuntu-bionic.*/d' -i /etc/hosts
-
 # Patch OS
 apt-get update && apt-get upgrade -y
 
 # Create local host entries
+echo "127.0.0.1 localhost" > /etc/hosts
 echo "$1.10 master" >> /etc/hosts
 echo "$1.11 node1" >> /etc/hosts
 echo "$1.12 node2" >> /etc/hosts
@@ -134,7 +127,15 @@ kubectl create -f /vagrant/kube-flannel.yml
 
 # Set alias on master for vagrant and root users
 echo "alias k=/usr/bin/kubectl" >> $HOME/.bash_profile
-sudo echo "alias k=/usr/bin/kubectl" >> /root/.bash_profile
+
+
+# Add kubectl bash completion
+kubectl completion bash > /tmp/kubectl
+sudo mv /tmp/kubectl /etc/bash_completion.d/kubectl
+echo 'complete -F __start_kubectl k' >> ~/.bashrc
+echo 'alias k=kubectl' >> ~/.bash_profile
+echo 'complete -o default -F __start_kubectl k' >> ~/.bash_profile
+
 
 # Install the etcd client
 sudo apt install etcd-client

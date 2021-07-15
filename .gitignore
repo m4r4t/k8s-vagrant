@@ -3,3 +3,5 @@ KIAMOL
 .vagrant
 *.dump
 *.log
+join.sh
+id_rsa.pub
