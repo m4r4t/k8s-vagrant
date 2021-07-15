@@ -52,6 +52,7 @@ $node_join = <<-SHELL
 sudo /vagrant/join.sh
 echo 'Environment="KUBELET_EXTRA_ARGS=--node-ip='$1.$2'"' | sudo tee -a /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 cat /vagrant/id_rsa.pub >> /home/vagrant/.ssh/authorized_keys
+
 sudo systemctl daemon-reload
 sudo systemctl restart kubelet
 SHELL
@@ -91,12 +92,18 @@ apt-get -qq update
 apt-get -qq install -y kubelet kubeadm kubectl
 apt-mark hold kubelet kubectl kubeadm
 
+#Change default cgroupDriver for Docker
+cp /vagrant/daemon.json /etc/docker/daemon.json
+systemctl restart docker.service
+
+
 # Set external DNS
 sed -i -e 's/#DNS=/DNS=8.8.8.8/' /etc/systemd/resolved.conf
 service systemd-resolved restart
 SCRIPT
 
 $provision_master_node = <<-SHELL
+KUB_NET=$1
 OUTPUT_FILE=/vagrant/join.sh
 KEY_FILE=/vagrant/id_rsa.pub
 rm -rf $OUTPUT_FILE
@@ -124,6 +131,11 @@ echo 'Environment="KUBELET_EXTRA_ARGS=--node-ip='$1'.10"' | sudo tee -a /etc/sys
 
 # Use our flannel config file so that routing will work properly
 kubectl create -f /vagrant/kube-flannel.yml
+
+# install calico 
+
+#sed "s/KUBNET/$KUB_NET/g" /vagrant/calico.yaml > /tmp/calico.yaml
+#kubectl apply -f /tmp/calico.yaml
 
 # Set alias on master for vagrant and root users
 echo "alias k=/usr/bin/kubectl" >> $HOME/.bash_profile
