@@ -46,6 +46,14 @@ Vagrant.configure("2") do |config|
   end
 
   config.vm.provision "shell", inline: $install_multicast
+
+  config.vm.define :master do |master|
+   master.vm.provision "shell" do |s|
+      s.privileged = true
+      s.inline = $install_cilium
+    end
+  end
+
 end
 
 $node_join = <<-SHELL
@@ -96,6 +104,8 @@ apt-mark hold kubelet kubectl kubeadm
 cp /vagrant/daemon.json /etc/docker/daemon.json
 systemctl restart docker.service
 
+apt-get -qq install nfs-common
+
 
 # Set external DNS
 sed -i -e 's/#DNS=/DNS=8.8.8.8/' /etc/systemd/resolved.conf
@@ -129,13 +139,13 @@ sudo chown -R root:root /root/.kube
 # Fix kubelet IP
 echo 'Environment="KUBELET_EXTRA_ARGS=--node-ip='$1'.10"' | sudo tee -a /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 
-# Use our flannel config file so that routing will work properly
-kubectl create -f /vagrant/kube-flannel.yml
-
 # install calico 
 
 #sed "s/KUBNET/$KUB_NET/g" /vagrant/calico.yaml > /tmp/calico.yaml
 #kubectl apply -f /tmp/calico.yaml
+
+#install flannel CNI
+##kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
 
 # Set alias on master for vagrant and root users
 echo "alias k=/usr/bin/kubectl" >> $HOME/.bash_profile
@@ -158,4 +168,22 @@ SHELL
 
 $install_multicast = <<-SHELL
 apt-get -qq install -y avahi-daemon libnss-mdns
+SHELL
+
+$install_cilium = <<-SHELL
+curl -L --remote-name-all https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz{,.sha256sum}
+sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
+sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/local/bin
+rm cilium-linux-amd64.tar.gz{,.sha256sum}
+cilium install
+
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+chmod 700 get_helm.sh
+./get_helm.sh
+helm completion bash > /etc/bash_completion.d/helm 
+helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
+helm install nfs-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
+    --set nfs.server=192.168.50.1 \
+    --set nfs.path=/DATA2/NFS \
+    --set storageClass.defaultClass=true
 SHELL
